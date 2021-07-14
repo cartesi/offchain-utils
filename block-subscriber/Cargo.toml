@@ -1,0 +1,24 @@
+[package]
+name = "block-subscriber"
+license = "Apache-2.0"
+version = "0.1.0"
+authors = ["Cartesi Team"]
+homepage = "https://cartesi.io"
+edition = "2018"
+
+[dependencies]
+backoff = { path = "../backoff"}
+configuration = { path = "../configuration"}
+middleware-factory = { path = "../middleware-factory" }
+offchain-core = { path = "../offchain-core" }
+
+structopt = "0.3"
+serde = "1.0.0"
+
+async-trait = "0.1"
+snafu = "0.6"
+tokio = { version = "^1.5", features = ["sync", "time", "macros"] }
+tokio-stream = "0.1"
+
+[dev-dependencies]
+tokio = { version = "^1.5", features = ["macros"] }

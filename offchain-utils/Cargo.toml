@@ -1,0 +1,14 @@
+[package]
+name = "offchain-utils"
+license = "Apache-2.0"
+version = "0.1.0"
+authors = ["Cartesi Team"]
+homepage = "https://cartesi.io"
+edition = "2018"
+
+[dependencies]
+backoff = { path = "../backoff" }
+block-subscriber = { path = "../block-subscriber" }
+configuration = { path = "../configuration" }
+offchain-core = { path = "../offchain-core" }
+middleware-factory = { path = "../middleware-factory" }

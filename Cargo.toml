@@ -1,0 +1,9 @@
+[workspace]
+members = [
+  "backoff",
+  "block-subscriber",
+  "configuration",
+  "offchain-core",
+  "offchain-utils",
+  "middleware-factory",
+]

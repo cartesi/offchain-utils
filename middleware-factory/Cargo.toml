@@ -1,0 +1,20 @@
+[package]
+name = "middleware-factory"
+license = "Apache-2.0"
+version = "0.1.0"
+authors = ["Cartesi Team"]
+homepage = "https://cartesi.io"
+edition = "2018"
+
+
+[dependencies]
+backoff = { path = "../backoff"}
+offchain-core = { path = "../offchain-core" }
+
+async-trait = "^0.1"
+snafu = "0.6"
+tokio = { version = "^1.5", features = ["sync"] }
+url = { version = "2.2.1", default-features = false }
+
+[dev-dependencies]
+tokio = { version = "^1.5", features = ["macros"] }
