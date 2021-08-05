@@ -40,6 +40,10 @@ pub struct Config {
     pub ws_url: Option<String>,
 }
 
+// default values
+const DEFAULT_DEPLOYMENT: &str = "localhost.json";
+const DEFAULT_URL: &str = "http://localhost:8545";
+
 pub fn load_config_file<T: Default + DeserializeOwned>(
     // path to the config file if provided
     config_file: Option<String>,
@@ -78,13 +82,15 @@ impl Config {
     pub fn initialize() -> Result<Self> {
         let env_cli_config = EnvCLIConfig::from_args();
 
-        let file_config: FileConfig =
-            load_config_file(env_cli_config.config, "dispatcher-v2")?;
+        let file_config: FileConfig = load_config_file(
+            env_cli_config.config,
+            "offchain-utils-configuration",
+        )?;
 
         let deployment = env_cli_config
             .deployment
             .or(file_config.deployment)
-            .unwrap_or(String::from("localhost.json"));
+            .unwrap_or(String::from(DEFAULT_DEPLOYMENT));
 
         let contracts = {
             let s = fs::read_to_string(deployment).map_err(|e| {
@@ -152,7 +158,7 @@ impl Config {
         let url = env_cli_config
             .url
             .or(file_config.url)
-            .unwrap_or(String::from("http://localhost:8545"));
+            .unwrap_or(String::from(DEFAULT_URL));
 
         let ws_url = env_cli_config.ws_url.or(file_config.ws_url);
 

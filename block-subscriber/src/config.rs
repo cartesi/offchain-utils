@@ -35,6 +35,11 @@ pub struct BSConfig {
     pub subscriber_timeout: Duration,
 }
 
+// default values
+const DEFAULT_MAX_DELAY: u64 = 1;
+const DEFAULT_MAX_RETRIES: usize = 5;
+const DEFAULT_TIMEOUT: u64 = 5;
+
 impl BSConfig {
     pub fn initialize() -> config_error::Result<Self> {
         let env_cli_config = BSEnvCLIConfig::from_args();
@@ -42,26 +47,26 @@ impl BSConfig {
         let file_config: BSFileConfig =
             configuration::config::load_config_file(
                 env_cli_config.bs_config,
-                "block subscriber",
+                "block-subscriber",
             )?;
 
         let max_delay = Duration::from_secs(
             env_cli_config
                 .bs_max_delay
                 .or(file_config.bs_max_delay)
-                .unwrap_or(1),
+                .unwrap_or(DEFAULT_MAX_DELAY),
         );
 
         let max_retries = env_cli_config
             .bs_max_retries
             .or(file_config.bs_max_retries)
-            .unwrap_or(5);
+            .unwrap_or(DEFAULT_MAX_RETRIES);
 
         let subscriber_timeout = Duration::from_secs(
             env_cli_config
                 .bs_timeout
                 .or(file_config.bs_timeout)
-                .unwrap_or(5),
+                .unwrap_or(DEFAULT_TIMEOUT),
         );
 
         Ok(BSConfig {
