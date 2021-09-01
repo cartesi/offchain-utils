@@ -10,8 +10,8 @@ use structopt::StructOpt;
 
 // TODO: add more options, review the default values
 #[derive(StructOpt, Clone, Debug)]
-struct EnvCLIConfig {
-    /// Path to dispatcher-v2 config
+pub struct EnvCLIConfig {
+    /// Path to offchain config
     #[structopt(short, long, env)]
     pub config: Option<String>,
     /// Path to deployment file
@@ -79,13 +79,9 @@ pub fn load_config_file<T: Default + DeserializeOwned>(
 }
 
 impl Config {
-    pub fn initialize() -> Result<Self> {
-        let env_cli_config = EnvCLIConfig::from_args();
-
-        let file_config: FileConfig = load_config_file(
-            env_cli_config.config,
-            "offchain-utils-configuration",
-        )?;
+    pub fn initialize(env_cli_config: EnvCLIConfig) -> Result<Self> {
+        let file_config: FileConfig =
+            load_config_file(env_cli_config.config, "offchain-configuration")?;
 
         let deployment = env_cli_config
             .deployment

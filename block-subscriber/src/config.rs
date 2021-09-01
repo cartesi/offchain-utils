@@ -4,9 +4,9 @@ use serde::Deserialize;
 use std::time::Duration;
 use structopt::StructOpt;
 
-#[derive(StructOpt, Debug)]
+#[derive(StructOpt, Clone, Debug)]
 #[structopt(name = "bs_config", about = "Configuration for block subscriber")]
-struct BSEnvCLIConfig {
+pub struct BSEnvCLIConfig {
     /// Path to block subscriber config
     #[structopt(long, env)]
     pub bs_config: Option<String>,
@@ -41,8 +41,9 @@ const DEFAULT_MAX_RETRIES: usize = 5;
 const DEFAULT_TIMEOUT: u64 = 5;
 
 impl BSConfig {
-    pub fn initialize() -> config_error::Result<Self> {
-        let env_cli_config = BSEnvCLIConfig::from_args();
+    pub fn initialize(
+        env_cli_config: BSEnvCLIConfig,
+    ) -> config_error::Result<Self> {
 
         let file_config: BSFileConfig =
             configuration::config::load_config_file(
