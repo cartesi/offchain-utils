@@ -11,7 +11,7 @@ use structopt::StructOpt;
 // TODO: add more options, review the default values
 #[derive(StructOpt, Clone, Debug)]
 pub struct EnvCLIConfig {
-    /// Path to offchain config
+    /// Path to offchain .toml config
     #[structopt(short, long, env)]
     pub config: Option<String>,
     /// Path to deployment file
@@ -26,10 +26,15 @@ pub struct EnvCLIConfig {
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]
-pub struct FileConfig {
+pub struct OffchainFileConfig {
     pub deployment: Option<String>,
     pub url: Option<String>,
     pub ws_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Default)]
+pub struct FileConfig {
+    pub offchain: OffchainFileConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -47,27 +52,22 @@ const DEFAULT_URL: &str = "http://localhost:8545";
 pub fn load_config_file<T: Default + DeserializeOwned>(
     // path to the config file if provided
     config_file: Option<String>,
-    // name of the module loading the config
-    config_module: &str,
 ) -> Result<T> {
     match config_file {
         Some(config) => {
-            let s = fs::read_to_string(config).map_err(|e| {
+            let s = fs::read_to_string(&config).map_err(|e| {
                 FileError {
                     err: format!(
-                        "Fail to read {} config file: {}",
-                        config_module, e
+                        "Fail to read config file {}, error: {}",
+                        config, e
                     ),
                 }
                 .build()
             })?;
 
-            let file_config: T = serde_yaml::from_str(&s).map_err(|e| {
+            let file_config: T = toml::from_str(&s).map_err(|e| {
                 ParseError {
-                    err: format!(
-                        "Fail to parse {} config file: {}",
-                        config_module, e
-                    ),
+                    err: format!("Fail to parse config {}, error: {}", s, e),
                 }
                 .build()
             })?;
@@ -80,12 +80,11 @@ pub fn load_config_file<T: Default + DeserializeOwned>(
 
 impl Config {
     pub fn initialize(env_cli_config: EnvCLIConfig) -> Result<Self> {
-        let file_config: FileConfig =
-            load_config_file(env_cli_config.config, "offchain-configuration")?;
+        let file_config: FileConfig = load_config_file(env_cli_config.config)?;
 
         let deployment = env_cli_config
             .deployment
-            .or(file_config.deployment)
+            .or(file_config.offchain.deployment)
             .unwrap_or(String::from(DEFAULT_DEPLOYMENT));
 
         let contracts = {
@@ -153,10 +152,10 @@ impl Config {
 
         let url = env_cli_config
             .url
-            .or(file_config.url)
+            .or(file_config.offchain.url)
             .unwrap_or(String::from(DEFAULT_URL));
 
-        let ws_url = env_cli_config.ws_url.or(file_config.ws_url);
+        let ws_url = env_cli_config.ws_url.or(file_config.offchain.ws_url);
 
         Ok(Config {
             contracts,
