@@ -8,4 +8,4 @@ edition = "2018"
 
 [dependencies]
 ethabi = { version = "14.0.0", default-features = false }
-ethers = { git = "https://github.com/gakonst/ethers-rs", rev = "4690f8e" }
+ethers = { version = "0.5.3", features = [ "ws" ] }
