@@ -46,7 +46,6 @@ pub struct Config {
 }
 
 // default values
-const DEFAULT_DEPLOYMENT: &str = "localhost.json";
 const DEFAULT_URL: &str = "http://localhost:8545";
 
 pub fn load_config_file<T: Default + DeserializeOwned>(
@@ -84,70 +83,74 @@ impl Config {
 
         let deployment = env_cli_config
             .deployment
-            .or(file_config.offchain.deployment)
-            .unwrap_or(String::from(DEFAULT_DEPLOYMENT));
+            .or(file_config.offchain.deployment);
 
-        let contracts = {
-            let s = fs::read_to_string(deployment).map_err(|e| {
-                FileError {
-                    err: format!("Fail to read deployment file: {}", e),
-                }
-                .build()
-            })?;
-
-            let json: serde_json::Value =
-                serde_json::from_str(&s).map_err(|e| {
-                    ParseError {
-                        err: format!("Fail to parse deployment file: {}", e),
+        let contracts = match deployment {
+            Some(deployment_file) => {
+                let s = fs::read_to_string(deployment_file).map_err(|e| {
+                    FileError {
+                        err: format!("Fail to read deployment file: {}", e),
                     }
                     .build()
                 })?;
 
-            let contracts_object = json["contracts"]
+                let json: serde_json::Value = serde_json::from_str(&s)
+                    .map_err(|e| {
+                        ParseError {
+                            err: format!(
+                                "Fail to parse deployment file: {}",
+                                e
+                            ),
+                        }
+                        .build()
+                    })?;
+
+                let contracts_object = json["contracts"]
                 .as_object()
                 .ok_or(snafu::NoneError)
                 .context(ParseError {
                     err: "Fail to obtain contracts object from deployment file",
                 })?;
 
-            contracts_object.into_iter().try_fold(
-                HashMap::new(),
-                |contracts, contract| {
-                    let address_str = serde_json::to_string(
-                        &contract.1["address"],
-                    )
-                    .map_err(|e| {
-                        ParseError {
-                            err: format!(
+                contracts_object.into_iter().try_fold(
+                    HashMap::new(),
+                    |contracts, contract| {
+                        let address_str =
+                            serde_json::to_string(&contract.1["address"])
+                                .map_err(|e| {
+                                    ParseError {
+                                        err: format!(
                                 "Fail to read address for contract {}: {}",
                                 contract.0, e
                             ),
-                        }
-                        .build()
-                    })?;
+                                    }
+                                    .build()
+                                })?;
 
-                    let address: Address = {
-                        // Remove leading quotes and '0x', and remove trailing
-                        // quotes
-                        let leading_offset = 3;
-                        let len = address_str.len() - 1;
+                        let address: Address = {
+                            // Remove leading quotes and '0x', and remove
+                            // trailing quotes
+                            let leading_offset = 3;
+                            let len = address_str.len() - 1;
 
-                        let address_str = &address_str[leading_offset..len];
+                            let address_str = &address_str[leading_offset..len];
 
-                        address_str.parse().map_err(|e| {
-                            ParseError {
-                                err: format!(
+                            address_str.parse().map_err(|e| {
+                                ParseError {
+                                    err: format!(
                                     "Fail to parse address for contract {}: {}",
                                     contract.0, e
                                 ),
-                            }
-                            .build()
-                        })?
-                    };
+                                }
+                                .build()
+                            })?
+                        };
 
-                    Ok(contracts.update(contract.0.clone(), address))
-                },
-            )?
+                        Ok(contracts.update(contract.0.clone(), address))
+                    },
+                )?
+            }
+            None => HashMap::new(),
         };
 
         let url = env_cli_config
