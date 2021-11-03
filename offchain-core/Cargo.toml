@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 ethabi = { version = "14.0.0", default-features = false }
 ethers = { version = "0.5.3", features = [ "ws" ] }
+serde = { version = "1.0.0", features = ["rc"] }

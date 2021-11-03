@@ -1487,6 +1487,7 @@ version = "0.1.0"
 dependencies = [
  "ethabi 14.1.0",
  "ethers",
+ "serde",
 ]
 
 [[package]]

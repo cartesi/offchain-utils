@@ -2,7 +2,9 @@ pub use ethabi;
 pub use ethers;
 
 pub mod types {
-    #[derive(Clone, Debug)]
+    use serde::{Serialize, Deserialize};
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
     pub struct Block {
         pub hash: ethers::types::H256,
         pub number: ethers::types::U64,
