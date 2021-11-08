@@ -23,7 +23,10 @@ pub trait MiddlewareFactory {
         + Sync;
 
     /// Get current middleware.
-    async fn current(&self) -> Arc<Self::Middleware>;
+    async fn current(&self) -> Self::Middleware;
+
+    /// Compares middleware parameter with current middleware.
+    async fn middleware_eq(&self, other: &Self::Middleware) -> bool;
 
     /// Get inner factory.
     async fn inner_factory(&self) -> &Self::InnerFactory;
@@ -32,10 +35,8 @@ pub trait MiddlewareFactory {
     /// current.
     async fn build_and_set_middleware(
         &self,
-        inner_middleware: Arc<
-            <Self::InnerFactory as MiddlewareFactory>::Middleware,
-        >,
-    ) -> Arc<Self::Middleware>;
+        inner_middleware: <Self::InnerFactory as MiddlewareFactory>::Middleware,
+    ) -> Self::Middleware;
 
     /// Returns if this error should trigger a retry.
     fn should_retry(err: &<Self::Middleware as Middleware>::Error) -> bool;
@@ -53,11 +54,12 @@ pub trait MiddlewareFactory {
     async fn new_middleware(
         &self,
         previous: Option<&Self::Middleware>,
-    ) -> Result<Arc<Self::Middleware>> {
+    ) -> Result<Self::Middleware> {
         let current = self.current().await;
 
         if let Some(previous) = previous {
-            if std::ptr::eq(current.as_ref(), previous) {
+            // if std::ptr::eq(current.as_ref(), previous) {
+            if self.middleware_eq(previous).await {
                 // Get inner middleware and inner factory
                 let current_inner = current.inner();
                 let inner_factory = self.inner_factory().await;
@@ -134,14 +136,58 @@ impl WsProviderFactory {
     }
 }
 
+pub struct PhantomFactory<T: Middleware> {
+    _marker: std::marker::PhantomData<T>,
+}
+
 #[async_trait]
-impl MiddlewareFactory for WsProviderFactory {
-    type Middleware = Provider<Ws>;
+impl<T: Middleware<Inner = T>> MiddlewareFactory for PhantomFactory<T> {
+    type Middleware = T;
     type InnerFactory = Self;
 
+    async fn current(&self) -> Self::Middleware {
+        unreachable!()
+    }
+
+    async fn middleware_eq(&self, _: &Self::Middleware) -> bool {
+        unreachable!()
+    }
+
+    async fn inner_factory(&self) -> &Self::InnerFactory {
+        unreachable!()
+    }
+
+    async fn build_and_set_middleware(
+        &self,
+        _: <Self::InnerFactory as MiddlewareFactory>::Middleware,
+    ) -> Self::Middleware {
+        unreachable!()
+    }
+
+    fn should_retry(_: &<Self::Middleware as Middleware>::Error) -> bool {
+        unreachable!()
+    }
+
+    async fn new_middleware(
+        &self,
+        _: Option<&Self::Middleware>,
+    ) -> Result<Self::Middleware> {
+        unreachable!()
+    }
+}
+
+#[async_trait]
+impl MiddlewareFactory for WsProviderFactory {
+    type Middleware = Arc<Provider<Ws>>;
+    type InnerFactory = PhantomFactory<Provider<Ws>>;
+
     /// User implemented methods
-    async fn current(&self) -> Arc<Self::Middleware> {
+    async fn current(&self) -> Self::Middleware {
         unreachable!("WsProviderFactory `current` unreachable")
+    }
+
+    async fn middleware_eq(&self, other: &Self::Middleware) -> bool {
+        std::ptr::eq(self.provider.lock().await.as_ref(), other.as_ref())
     }
 
     async fn inner_factory(&self) -> &Self::InnerFactory {
@@ -150,8 +196,8 @@ impl MiddlewareFactory for WsProviderFactory {
 
     async fn build_and_set_middleware(
         &self,
-        _: Arc<<Self::InnerFactory as MiddlewareFactory>::Middleware>,
-    ) -> Arc<Self::Middleware> {
+        _: <Self::InnerFactory as MiddlewareFactory>::Middleware,
+    ) -> Self::Middleware {
         unreachable!("WsProviderFactory `build_and_set_middleware` unreachable")
     }
 
@@ -165,11 +211,11 @@ impl MiddlewareFactory for WsProviderFactory {
     async fn new_middleware(
         &self,
         previous: Option<&Self::Middleware>,
-    ) -> Result<Arc<Self::Middleware>> {
+    ) -> Result<Self::Middleware> {
         let mut current = self.provider.lock().await;
 
         if let Some(previous) = previous {
-            if std::ptr::eq(current.as_ref(), previous) {
+            if std::ptr::eq(current.as_ref(), previous.as_ref()) {
                 let new_provider = Arc::new(
                     WsProviderFactory::new_web3_ws(
                         &self.url,
@@ -209,12 +255,16 @@ impl HttpProviderFactory {
 
 #[async_trait]
 impl MiddlewareFactory for HttpProviderFactory {
-    type Middleware = Provider<Http>;
-    type InnerFactory = Self;
+    type Middleware = Arc<Provider<Http>>;
+    type InnerFactory = PhantomFactory<Provider<Http>>;
 
     /// User implemented methods
-    async fn current(&self) -> Arc<Self::Middleware> {
+    async fn current(&self) -> Self::Middleware {
         unreachable!("HttpProviderFactory `current` unreachable")
+    }
+
+    async fn middleware_eq(&self, other: &Self::Middleware) -> bool {
+        std::ptr::eq(self.provider.lock().await.as_ref(), other.as_ref())
     }
 
     async fn inner_factory(&self) -> &Self::InnerFactory {
@@ -223,8 +273,8 @@ impl MiddlewareFactory for HttpProviderFactory {
 
     async fn build_and_set_middleware(
         &self,
-        _: Arc<<Self::InnerFactory as MiddlewareFactory>::Middleware>,
-    ) -> Arc<Self::Middleware> {
+        _: <Self::InnerFactory as MiddlewareFactory>::Middleware,
+    ) -> Self::Middleware {
         unreachable!(
             "HttpProviderFactory `build_and_set_middleware` unreachable"
         )
@@ -240,11 +290,11 @@ impl MiddlewareFactory for HttpProviderFactory {
     async fn new_middleware(
         &self,
         previous: Option<&Self::Middleware>,
-    ) -> Result<Arc<Self::Middleware>> {
+    ) -> Result<Self::Middleware> {
         let mut current = self.provider.lock().await;
 
         if let Some(previous) = previous {
-            if std::ptr::eq(current.as_ref(), previous) {
+            if std::ptr::eq(current.as_ref(), previous.as_ref()) {
                 let new_provider = Arc::new(
                     Provider::<Http>::try_from(self.url.clone())
                         .context(ParseError {})?,
@@ -262,7 +312,7 @@ impl MiddlewareFactory for HttpProviderFactory {
 ///
 /// "Root" Local Signer Middleware Factory
 pub struct LocalSignerFactory<IF: MiddlewareFactory> {
-    signer: Mutex<Arc<SignerMiddleware<Arc<IF::Middleware>, LocalWallet>>>,
+    signer: Mutex<Arc<SignerMiddleware<IF::Middleware, LocalWallet>>>,
     inner_factory: Arc<IF>,
     wallet: LocalWallet,
 }
@@ -289,13 +339,16 @@ impl<IF: MiddlewareFactory + Sync + Send> LocalSignerFactory<IF> {
 impl<IF: MiddlewareFactory + Sync + Send> MiddlewareFactory
     for LocalSignerFactory<IF>
 {
-    type Middleware = SignerMiddleware<Arc<IF::Middleware>, LocalWallet>;
+    type Middleware = Arc<SignerMiddleware<IF::Middleware, LocalWallet>>;
     type InnerFactory = IF;
 
     /// User implemented methods
-    async fn current(&self) -> Arc<Self::Middleware> {
-        let x = self.signer.lock().await.clone();
-        x
+    async fn current(&self) -> Self::Middleware {
+        self.signer.lock().await.clone()
+    }
+
+    async fn middleware_eq(&self, other: &Self::Middleware) -> bool {
+        std::ptr::eq(self.signer.lock().await.as_ref(), other.as_ref())
     }
 
     async fn inner_factory(&self) -> &Self::InnerFactory {
@@ -304,41 +357,20 @@ impl<IF: MiddlewareFactory + Sync + Send> MiddlewareFactory
 
     async fn build_and_set_middleware(
         &self,
-        _: Arc<<Self::InnerFactory as MiddlewareFactory>::Middleware>,
-    ) -> Arc<Self::Middleware> {
-        unreachable!(
-            "LocalSignerFactory `build_and_set_middleware` unreachable"
-        )
+        inner_middleware: IF::Middleware,
+    ) -> Self::Middleware {
+        let new = Arc::new(SignerMiddleware::new(
+            inner_middleware,
+            self.wallet.clone(),
+        ));
+
+        *self.signer.lock().await = Arc::clone(&new);
+        new
     }
 
     fn should_retry(_err: &<Self::Middleware as Middleware>::Error) -> bool {
         unreachable!("LocalSignerFactory `should_retry` unreachable")
     }
-
-    // async fn new_middleware(
-    //     &self,
-    //     previous: Option<&Self::Middleware>,
-    // ) -> Result<Arc<Self::Middleware>> {
-    //     let mut current = self.signer.lock().await;
-
-    //     if let Some(previous) = previous {
-    //         if std::ptr::eq(current.as_ref(), previous) {
-    //             let new_provider = self
-    //                 .inner_factory
-    //                 .new_middleware(Some(previous.inner()))
-    //                 .await?;
-    //             let new_signer = Arc::new(SignerMiddleware::new(
-    //                 new_provider,
-    //                 self.wallet.clone(),
-    //             ));
-    //             *current = Arc::clone(&new_signer);
-
-    //             return Ok(new_signer);
-    //         }
-    //     }
-
-    //     Ok(Arc::clone(&current))
-    // }
 }
 
 #[derive(Debug, Snafu)]
@@ -372,7 +404,7 @@ mod tests {
 
     #[derive(Debug)]
     pub struct IdMiddleware<M: Middleware> {
-        inner: Arc<M>,
+        inner: M,
     }
 
     #[derive(Debug, Snafu)]
@@ -422,12 +454,16 @@ mod tests {
     where
         IF: MiddlewareFactory + Send + Sync + 'static,
     {
-        type Middleware = IdMiddleware<IF::Middleware>;
+        type Middleware = Arc<IdMiddleware<IF::Middleware>>;
         type InnerFactory = IF;
 
         /// User implemented methods, only to be called internally.
-        async fn current(&self) -> Arc<Self::Middleware> {
+        async fn current(&self) -> Self::Middleware {
             self.current.lock().await.clone()
+        }
+
+        async fn middleware_eq(&self, other: &Self::Middleware) -> bool {
+            std::ptr::eq(self.current.lock().await.as_ref(), other.as_ref())
         }
 
         async fn inner_factory(&self) -> &Self::InnerFactory {
@@ -436,10 +472,9 @@ mod tests {
 
         async fn build_and_set_middleware(
             &self,
-            inner_middleware: Arc<
+            inner_middleware:
                 <Self::InnerFactory as MiddlewareFactory>::Middleware,
-            >,
-        ) -> Arc<Self::Middleware> {
+        ) -> Self::Middleware {
             let new = Arc::new(IdMiddleware {
                 inner: inner_middleware,
             });

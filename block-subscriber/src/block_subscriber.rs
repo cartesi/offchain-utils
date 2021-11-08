@@ -132,17 +132,11 @@ where
     async fn background_process(
         &self,
     ) -> Result<(), <MF as MiddlewareFactory>::Middleware> {
-        let mut middleware_opt: Option<
-            Arc<<MF as MiddlewareFactory>::Middleware>,
-        > = None;
+        let mut middleware = self.new_middleware(None).await?;
 
         // Loop and retry on error.
         loop {
-            let middleware = {
-                let middleware_opt_ref = middleware_opt.as_ref().map(|x| x.as_ref());
-                self.new_middleware(middleware_opt_ref).await?
-            };
-            middleware_opt = Some(Arc::clone(&middleware));
+            middleware = self.new_middleware(Some(&middleware)).await?;
 
             // Subscribe to new blocks, retrying if it fails.
             let mut backoff =
@@ -234,7 +228,7 @@ where
         &self,
         previous: Option<&<MF as MiddlewareFactory>::Middleware>,
     ) -> Result<
-        Arc<<MF as MiddlewareFactory>::Middleware>,
+        <MF as MiddlewareFactory>::Middleware,
         <MF as MiddlewareFactory>::Middleware,
     > {
         self.factory
