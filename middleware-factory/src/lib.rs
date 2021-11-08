@@ -1,5 +1,7 @@
 use async_trait::async_trait;
+use offchain_core::ethers::middleware::SignerMiddleware;
 use offchain_core::ethers::providers::{self, Http, Middleware, Provider, Ws};
+use offchain_core::ethers::signers::LocalWallet;
 use snafu::{ResultExt, Snafu};
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -7,12 +9,10 @@ use tokio::sync::Mutex;
 
 ///
 /// Middleware Factory
-///
 #[async_trait]
 pub trait MiddlewareFactory {
     ///
     /// User Implementation
-    ///
 
     /// Middleware that this factory creates.
     type Middleware: Middleware;
@@ -42,7 +42,6 @@ pub trait MiddlewareFactory {
 
     ///
     /// Automatic Implementation
-    ///
 
     /// Automatic implementation of `new_middleware`. This function receives a
     /// optional middleware. If it is `None`, it will return the current
@@ -82,7 +81,6 @@ pub trait MiddlewareFactory {
 
 ///
 /// "Root" Websocket Middleware Factory
-///
 pub struct WsProviderFactory {
     provider: Mutex<Arc<Provider<Ws>>>,
     url: String,
@@ -154,7 +152,7 @@ impl MiddlewareFactory for WsProviderFactory {
         &self,
         _: Arc<<Self::InnerFactory as MiddlewareFactory>::Middleware>,
     ) -> Arc<Self::Middleware> {
-        unreachable!("WsProviderFactory `build_middleware` unreachable")
+        unreachable!("WsProviderFactory `build_and_set_middleware` unreachable")
     }
 
     fn should_retry(err: &<Self::Middleware as Middleware>::Error) -> bool {
@@ -192,7 +190,6 @@ impl MiddlewareFactory for WsProviderFactory {
 
 ///
 /// "Root" Http Middleware Factory
-///
 pub struct HttpProviderFactory {
     provider: Mutex<Arc<Provider<Http>>>,
     url: String,
@@ -228,7 +225,9 @@ impl MiddlewareFactory for HttpProviderFactory {
         &self,
         _: Arc<<Self::InnerFactory as MiddlewareFactory>::Middleware>,
     ) -> Arc<Self::Middleware> {
-        unreachable!("HttpProviderFactory `build_middleware` unreachable")
+        unreachable!(
+            "HttpProviderFactory `build_and_set_middleware` unreachable"
+        )
     }
 
     fn should_retry(err: &<Self::Middleware as Middleware>::Error) -> bool {
@@ -258,6 +257,88 @@ impl MiddlewareFactory for HttpProviderFactory {
 
         Ok(Arc::clone(&current))
     }
+}
+
+///
+/// "Root" Local Signer Middleware Factory
+pub struct LocalSignerFactory<IF: MiddlewareFactory> {
+    signer: Mutex<Arc<SignerMiddleware<Arc<IF::Middleware>, LocalWallet>>>,
+    inner_factory: Arc<IF>,
+    wallet: LocalWallet,
+}
+
+impl<IF: MiddlewareFactory + Sync + Send> LocalSignerFactory<IF> {
+    pub async fn new(
+        inner_factory: Arc<IF>,
+        wallet: LocalWallet,
+    ) -> Result<Arc<Self>> {
+        let provider = inner_factory.new_middleware(None).await?;
+
+        Ok(Arc::new(Self {
+            signer: Mutex::new(Arc::new(SignerMiddleware::new(
+                provider,
+                wallet.clone(),
+            ))),
+            inner_factory,
+            wallet,
+        }))
+    }
+}
+
+#[async_trait]
+impl<IF: MiddlewareFactory + Sync + Send> MiddlewareFactory
+    for LocalSignerFactory<IF>
+{
+    type Middleware = SignerMiddleware<Arc<IF::Middleware>, LocalWallet>;
+    type InnerFactory = IF;
+
+    /// User implemented methods
+    async fn current(&self) -> Arc<Self::Middleware> {
+        let x = self.signer.lock().await.clone();
+        x
+    }
+
+    async fn inner_factory(&self) -> &Self::InnerFactory {
+        &self.inner_factory
+    }
+
+    async fn build_and_set_middleware(
+        &self,
+        _: Arc<<Self::InnerFactory as MiddlewareFactory>::Middleware>,
+    ) -> Arc<Self::Middleware> {
+        unreachable!(
+            "LocalSignerFactory `build_and_set_middleware` unreachable"
+        )
+    }
+
+    fn should_retry(_err: &<Self::Middleware as Middleware>::Error) -> bool {
+        unreachable!("LocalSignerFactory `should_retry` unreachable")
+    }
+
+    // async fn new_middleware(
+    //     &self,
+    //     previous: Option<&Self::Middleware>,
+    // ) -> Result<Arc<Self::Middleware>> {
+    //     let mut current = self.signer.lock().await;
+
+    //     if let Some(previous) = previous {
+    //         if std::ptr::eq(current.as_ref(), previous) {
+    //             let new_provider = self
+    //                 .inner_factory
+    //                 .new_middleware(Some(previous.inner()))
+    //                 .await?;
+    //             let new_signer = Arc::new(SignerMiddleware::new(
+    //                 new_provider,
+    //                 self.wallet.clone(),
+    //             ));
+    //             *current = Arc::clone(&new_signer);
+
+    //             return Ok(new_signer);
+    //         }
+    //     }
+
+    //     Ok(Arc::clone(&current))
+    // }
 }
 
 #[derive(Debug, Snafu)]
@@ -385,6 +466,26 @@ mod tests {
         assert!(Arc::ptr_eq(&m, &m_same));
 
         let m2 = id_factory.new_middleware(Some(&m)).await.unwrap();
+        assert!(!Arc::ptr_eq(&m, &m2));
+    }
+
+    #[tokio::test]
+    async fn signer_middleware_test() {
+        let root_factory =
+            HttpProviderFactory::new("http://localhost:8545".to_string())
+                .unwrap();
+        let wallet: LocalWallet =
+            "380eb0f3d505f087e438eca80bc4df9a7faa24f868e69fc0440261a0fc0567dc"
+                .parse()
+                .unwrap();
+        let signer_factory =
+            LocalSignerFactory::new(root_factory, wallet).await.unwrap();
+
+        let m = signer_factory.new_middleware(None).await.unwrap();
+        let m_same = signer_factory.new_middleware(None).await.unwrap();
+        assert!(Arc::ptr_eq(&m, &m_same));
+
+        let m2 = signer_factory.new_middleware(Some(&m)).await.unwrap();
         assert!(!Arc::ptr_eq(&m, &m2));
     }
 }
