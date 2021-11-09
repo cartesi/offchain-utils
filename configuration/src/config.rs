@@ -1,11 +1,16 @@
 use crate::error::*;
 
-use offchain_core::ethers::core::types::Address;
+use offchain_core::ethers;
 
+use ethers::core::rand::thread_rng;
+use ethers::core::types::Address;
+use ethers::signers::{coins_bip39::English, LocalWallet, MnemonicBuilder};
 use im::HashMap;
+use rpassword::prompt_password_stdout;
 use serde::{de::DeserializeOwned, Deserialize};
 use snafu::ResultExt;
 use std::fs;
+use std::path::Path;
 use structopt::StructOpt;
 
 // TODO: add more options, review the default values
@@ -17,19 +22,35 @@ pub struct EnvCLIConfig {
     /// Path to deployment file
     #[structopt(short, long, env)]
     pub deployment: Option<String>,
+    /// Mnemonic phrase of the wallet
+    #[structopt(long, env)]
+    pub mnemonic: Option<String>,
+    /// Seed of the wallet
+    #[structopt(long, env)]
+    pub seed: Option<String>,
     /// Provider http endpoint
     #[structopt(short, long, env)]
     pub url: Option<String>,
     /// Provider websocket endpoint
     #[structopt(long, env)]
     pub ws_url: Option<String>,
+    /// Create the wallet if file doesn't exist
+    #[structopt(long, env)]
+    pub wallet_create: Option<bool>,
+    /// Path to the password encrypted wallet json file
+    #[structopt(long, env)]
+    pub wallet_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]
 pub struct OffchainFileConfig {
     pub deployment: Option<String>,
+    pub mnemonic: Option<String>,
+    pub seed: Option<String>,
     pub url: Option<String>,
     pub ws_url: Option<String>,
+    pub wallet_create: Option<bool>,
+    pub wallet_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]
@@ -43,10 +64,12 @@ pub struct Config {
     pub contracts: HashMap<String, Address>,
     pub url: String,
     pub ws_url: Option<String>,
+    pub wallet: Option<LocalWallet>,
 }
 
 // default values
 const DEFAULT_URL: &str = "http://localhost:8545";
+const DEFAULT_WALLET_CREATE: bool = false;
 
 pub fn load_config_file<T: Default + DeserializeOwned>(
     // path to the config file if provided
@@ -160,10 +183,140 @@ impl Config {
 
         let ws_url = env_cli_config.ws_url.or(file_config.offchain.ws_url);
 
+        let mnemonic =
+            env_cli_config.mnemonic.or(file_config.offchain.mnemonic);
+
+        // TODO: support seed
+        let _seed = env_cli_config.seed.or(file_config.offchain.seed);
+
+        let wallet_create = env_cli_config
+            .wallet_create
+            .or(file_config.offchain.wallet_create)
+            .unwrap_or(DEFAULT_WALLET_CREATE);
+
+        let wallet_path = env_cli_config
+            .wallet_path
+            .or(file_config.offchain.wallet_path);
+
+        // Priority of loading a wallet
+        // Wallet file path > mnemonic > seed
+        let wallet = if let Some(path) = wallet_path {
+            let path = Path::new(&path);
+            match (path.exists(), wallet_create) {
+                (true, _) => {
+                    let password = prompt_password_stdout("Enter password: ")
+                        .map_err(|e| {
+                        ParseError {
+                            err: format!(
+                                "Fail to parse password for wallet, error: {}",
+                                e
+                            ),
+                        }
+                        .build()
+                    })?;
+                    Some(
+                        LocalWallet::decrypt_keystore(&path, &password)
+                            .map_err(|e| {
+                                FileError {
+                                    err: format!(
+                                        "Fail to decrypt wallet, error: {}",
+                                        e
+                                    ),
+                                }
+                                .build()
+                            })?,
+                    )
+                }
+                (false, true) => {
+                    let new_password =
+                        prompt_password_stdout("Enter new password: ")
+                            .map_err(|e| {
+                                ParseError {
+                                    err: format!(
+                                        "Fail to parse new password, error: {}",
+                                        e
+                                    ),
+                                }
+                                .build()
+                            })?;
+                    let retype_password = prompt_password_stdout(
+                        "Retype password: ",
+                    )
+                    .map_err(|e| {
+                        ParseError {
+                            err: format!(
+                                "Fail to parse re-type password, error: {}",
+                                e
+                            ),
+                        }
+                        .build()
+                    })?;
+
+                    if new_password != retype_password {
+                        return ParseError {
+                            err: format!("Passwords don't match"),
+                        }
+                        .fail();
+                    }
+
+                    let dir = if path.is_dir() {
+                        path
+                    } else {
+                        path.parent().ok_or(snafu::NoneError).context(
+                            FileError {
+                                err: "Fail to obtain directory to save wallet",
+                            },
+                        )?
+                    };
+
+                    Some(
+                        LocalWallet::new_keystore(
+                            &dir,
+                            &mut thread_rng(),
+                            &new_password,
+                        )
+                        .map_err(|e| {
+                            FileError {
+                                err: format!(
+                                    "Fail to create wallet, error: {}",
+                                    e
+                                ),
+                            }
+                            .build()
+                        })?,
+                    )
+                }
+                _ => {
+                    return FileError {
+                        err: format!("Wallet file doesn't exist, do you want to create one? Set --wallet_create to true"),
+                    }
+                    .fail();
+                }
+            }
+        } else if let Some(phrase) = mnemonic {
+            Some(
+                MnemonicBuilder::<English>::default()
+                    .phrase(phrase.as_str())
+                    .build()
+                    .map_err(|e| {
+                        ParseError {
+                            err: format!(
+                                "Fail to parse mnemonic, error: {}",
+                                e
+                            ),
+                        }
+                        .build()
+                    })?,
+            )
+        } else {
+            None
+        };
+
         Ok(Config {
             contracts,
             url,
             ws_url,
+            wallet,
         })
     }
 }
