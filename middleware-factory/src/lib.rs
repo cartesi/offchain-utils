@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use offchain_core::ethers::middleware::SignerMiddleware;
+use offchain_core::ethers::middleware::{
+    signer::SignerMiddlewareError, SignerMiddleware,
+};
 use offchain_core::ethers::providers::{self, Http, Middleware, Provider, Ws};
 use offchain_core::ethers::signers::LocalWallet;
 use snafu::{ResultExt, Snafu};
@@ -368,8 +370,15 @@ impl<IF: MiddlewareFactory + Sync + Send> MiddlewareFactory
         new
     }
 
-    fn should_retry(_err: &<Self::Middleware as Middleware>::Error) -> bool {
-        unreachable!("LocalSignerFactory `should_retry` unreachable")
+    fn should_retry(err: &<Self::Middleware as Middleware>::Error) -> bool {
+        // TODO: Improve this retry policy. We may need to change `ethers`
+        // to expose inner error types.
+        match err {
+            SignerMiddlewareError::MiddlewareError(m_err) => {
+                IF::should_retry(m_err)
+            }
+            _ => false,
+        }
     }
 }
 
