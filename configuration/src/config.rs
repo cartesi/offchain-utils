@@ -269,6 +269,10 @@ impl Config {
                         )?
                     };
 
+                    // TODO: create symlink for the wallet file
+                    // need to wait for release of this PR
+                    // https://github.com/gakonst/ethers-rs/pull/559
+
                     Some(
                         LocalWallet::new_keystore(
                             &dir,
