@@ -1,3 +1,5 @@
+pub mod contract;
+
 pub use ethabi;
 pub use ethers;
 
