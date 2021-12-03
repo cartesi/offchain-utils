@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use ethers::contract::Abigen;
-use proc_macro2::{Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
+use quote::quote;
 use serde_json::Value;
 use std::error;
 use std::io::{Read, Write};
@@ -79,6 +80,7 @@ where
 
     let bindings = Abigen::new(&contract_name, abi_source)?.generate()?;
     let tokens = bindings.into_tokens();
+
     let tokens = self::replace_ethers_crates(tokens);
     let raw = tokens.to_string();
     let formatted = self::format(&raw).unwrap_or(raw);
@@ -124,28 +126,49 @@ where
 /// This way, updating the ethers version is trivial, and we make sure every
 /// contract bindings use it.
 fn replace_ethers_crates(stream: TokenStream) -> TokenStream {
+    replace_ethers_crates_inner(stream, false)
+}
+
+fn replace_ethers_crates_inner(
+    stream: TokenStream,
+    inside_module: bool,
+) -> TokenStream {
+    let mut module = false;
+    let mut inside_module = inside_module;
     let mut new_stream = TokenStream::new();
 
     for v in stream {
         match v {
             TokenTree::Group(group) => {
-                let group_stream = replace_ethers_crates(group.stream());
-
+                let inside_module =
+                    module && matches!(group.delimiter(), Delimiter::Brace);
+                let group_stream =
+                    replace_ethers_crates_inner(group.stream(), inside_module);
+                if inside_module {
+                    module = false;
+                }
                 new_stream.extend([TokenTree::Group(Group::new(
                     group.delimiter(),
                     group_stream,
                 ))]);
             }
             TokenTree::Ident(ident) => {
-                if ident == "ethers" {
-                    new_stream.extend([
-                        TokenTree::Ident(Ident::new(
-                            "offchain_core",
-                            Span::call_site(),
-                        )),
-                        TokenTree::Punct(Punct::new(':', Spacing::Joint)),
-                        TokenTree::Punct(Punct::new(':', Spacing::Alone)),
-                    ]);
+                if ident == "use" && inside_module {
+                    inside_module = false;
+                    new_stream.extend([quote!(
+                        mod ethers_core {
+                            pub use offchain_core::ethers::core::*;
+                        }
+                        mod ethers_providers {
+                            pub use offchain_core::ethers::providers::*;
+                        }
+                        mod ethers_contract {
+                            pub use offchain_core::ethers::contract::*;
+                        }
+                    )]);
+                }
+                if ident == "mod" {
+                    module = true;
                 }
 
                 new_stream.extend([TokenTree::Ident(ident)]);
@@ -165,19 +188,22 @@ mod tests {
     #[test]
     fn test_replacing_ethers_crates_uses_correct_crates() {
         let input = quote! {
-            use ethers::contract::something;
-
-            #[hi::there]
-            fn foo() {
-                let whatever = "test";
+            mod prdel {
+                use ethers::whatever;
             }
         };
         let expected_output = quote! {
-            use offchain_core::ethers::contract::something;
-
-            #[hi::there]
-            fn foo() {
-                let whatever = "test";
+            mod prdel {
+                mod ethers_core {
+                    pub use offchain_core::ethers::core::*;
+                }
+                mod ethers_providers {
+                    pub use offchain_core::ethers::providers::*;
+                }
+                mod ethers_contract {
+                    pub use offchain_core::ethers::contract::*;
+                }
+                use ethers::whatever;
             }
         }
         .to_string();
