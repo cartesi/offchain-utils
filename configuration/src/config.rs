@@ -259,36 +259,44 @@ impl Config {
                         .fail();
                     }
 
-                    let dir = if path.is_dir() {
-                        path
-                    } else {
-                        path.parent().ok_or(snafu::NoneError).context(
+                    let (dir, need_symlink) =
+                        if path.is_dir() {
+                            (path, false)
+                        } else {
+                            (path.parent().ok_or(snafu::NoneError).context(
                             FileError {
                                 err: "Fail to obtain directory to save wallet",
                             },
-                        )?
-                    };
+                        )?, true)
+                        };
 
-                    // TODO: create symlink for the wallet file
-                    // need to wait for release of this PR
-                    // https://github.com/gakonst/ethers-rs/pull/559
-
-                    Some(
-                        LocalWallet::new_keystore(
-                            &dir,
-                            &mut thread_rng(),
-                            &new_password,
-                        )
-                        .map_err(|e| {
-                            FileError {
-                                err: format!(
-                                    "Fail to create wallet, error: {}",
-                                    e
-                                ),
-                            }
-                            .build()
-                        })?,
+                    let new_wallet = LocalWallet::new_keystore(
+                        &dir,
+                        &mut thread_rng(),
+                        &new_password,
                     )
+                    .map_err(|e| {
+                        FileError {
+                            err: format!("Fail to create wallet, error: {}", e),
+                        }
+                        .build()
+                    })?;
+
+                    if need_symlink {
+                        // create symlink for the new wallet file
+                        std::os::unix::fs::symlink(dir.join(new_wallet.1), path)
+                            .map_err(|e| {
+                                FileError {
+                                    err: format!(
+                                        "Fail to create wallet symlink, error: {}",
+                                        e
+                                    ),
+                                }
+                                .build()
+                            })?
+                    }
+
+                    Some(new_wallet.0)
                 }
                 _ => {
                     return FileError {
