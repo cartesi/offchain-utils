@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use ethers::contract::Abigen;
+use proc_macro2::token_stream::IntoIter;
 use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
 use quote::quote;
 use serde_json::Value;
@@ -126,58 +127,113 @@ where
 /// This way, updating the ethers version is trivial, and we make sure every
 /// contract bindings use it.
 fn replace_ethers_crates(stream: TokenStream) -> TokenStream {
-    replace_ethers_crates_inner(stream, false)
+    look_for_module(TokenStream::new(), &mut stream.into_iter())
 }
 
-fn replace_ethers_crates_inner(
-    stream: TokenStream,
-    inside_module: bool,
+/// Find the first `mod` statement and then
+/// [`look_for_group`][self::look_for_group]
+fn look_for_module(
+    mut new_stream: TokenStream,
+    stream: &mut IntoIter,
 ) -> TokenStream {
-    let mut module = false;
-    let mut inside_module = inside_module;
-    let mut new_stream = TokenStream::new();
+    match stream.next() {
+        None => new_stream,
+        Some(next) => {
+            let found =
+                matches!(&next, TokenTree::Ident(ident) if ident == "mod");
 
-    for v in stream {
-        match v {
-            TokenTree::Group(group) => {
-                let inside_module =
-                    module && matches!(group.delimiter(), Delimiter::Brace);
-                let group_stream =
-                    replace_ethers_crates_inner(group.stream(), inside_module);
-                if inside_module {
-                    module = false;
-                }
-                new_stream.extend([TokenTree::Group(Group::new(
-                    group.delimiter(),
-                    group_stream,
-                ))]);
-            }
-            TokenTree::Ident(ident) => {
-                if ident == "use" && inside_module {
-                    inside_module = false;
-                    new_stream.extend([quote!(
-                        mod ethers_core {
-                            pub use offchain_core::ethers::core::*;
-                        }
-                        mod ethers_providers {
-                            pub use offchain_core::ethers::providers::*;
-                        }
-                        mod ethers_contract {
-                            pub use offchain_core::ethers::contract::*;
-                        }
-                    )]);
-                }
-                if ident == "mod" {
-                    module = true;
-                }
+            new_stream.extend([next]);
 
-                new_stream.extend([TokenTree::Ident(ident)]);
+            if found {
+                look_for_group(new_stream, stream)
+            } else {
+                look_for_module(new_stream, stream)
             }
-            tree => new_stream.extend([tree]),
         }
     }
+}
 
-    new_stream
+/// Find opening braces `{` and then [`look_for_use`][self::look_for_use] within
+/// the tokens inside. Then goes to [`look_for_module`][self::look_for_module]
+/// on the subsequent tokens after closing brace `}`.
+fn look_for_group(
+    mut new_stream: TokenStream,
+    stream: &mut IntoIter,
+) -> TokenStream {
+    match stream.next() {
+        None => new_stream,
+        Some(next) => {
+            let found = matches!(&next, TokenTree::Group(group) if matches!(group.delimiter(), Delimiter::Brace));
+
+            if found {
+                if let TokenTree::Group(group) = &next {
+                    let group_stream = look_for_use(
+                        TokenStream::new(),
+                        &mut group.stream().into_iter(),
+                    );
+
+                    new_stream.extend([TokenTree::Group(Group::new(
+                        group.delimiter(),
+                        group_stream,
+                    ))]);
+                }
+
+                look_for_module(new_stream, stream)
+            } else {
+                new_stream.extend([next]);
+
+                look_for_group(new_stream, stream)
+            }
+        }
+    }
+}
+
+/// Find the first `use` statement and preface it with this:
+/// ```
+/// mod ethers_core {
+///     pub use offchain_core::ethers::core::*;
+/// }
+/// mod ethers_providers {
+///     pub use offchain_core::ethers::providers::*;
+/// }
+/// mod ethers_contract {
+///     pub use offchain_core::ethers::contract::*;
+/// }
+/// ```
+/// Then goes to [`look_for_module`][self::look_for_module] on the subsequent
+/// tokens.
+fn look_for_use(
+    mut new_stream: TokenStream,
+    stream: &mut IntoIter,
+) -> TokenStream {
+    match stream.next() {
+        None => new_stream,
+        Some(next) => {
+            let found =
+                matches!(&next, TokenTree::Ident(ident) if ident == "use");
+
+            if found {
+                new_stream.extend([quote!(
+                    mod ethers_core {
+                        pub use offchain_core::ethers::core::*;
+                    }
+                    mod ethers_providers {
+                        pub use offchain_core::ethers::providers::*;
+                    }
+                    mod ethers_contract {
+                        pub use offchain_core::ethers::contract::*;
+                    }
+                )]);
+                new_stream.extend([next]);
+
+                look_for_module(new_stream, stream)
+            } else {
+                new_stream.extend([next]);
+
+                look_for_use(new_stream, stream)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

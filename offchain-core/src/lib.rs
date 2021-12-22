@@ -4,7 +4,7 @@ pub use ethabi;
 pub use ethers;
 
 pub mod types {
-    use serde::{Serialize, Deserialize};
+    use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub struct Block {
