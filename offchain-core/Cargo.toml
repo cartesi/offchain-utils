@@ -7,7 +7,7 @@ homepage = "https://cartesi.io"
 edition = "2018"
 
 [dependencies]
-ethabi = { version = "14.0.0", default-features = false }
+ethabi = { version = "16.0.0", default-features = false }
 ethers = { version = "^0.6", features = [ "ws" ] }
 serde = { version = "1.0.0", features = ["rc"] }
 serde_json = "1.0"

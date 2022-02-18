@@ -13,8 +13,8 @@ offchain-core = { path = "../offchain-core" }
 
 async-trait = "^0.1"
 snafu = "0.6"
-tokio = { version = "^1.5", features = ["sync"] }
+tokio = { version = "1", features = ["sync"] }
 url = { version = "2.2.1", default-features = false }
 
 [dev-dependencies]
-tokio = { version = "^1.5", features = ["macros"] }
+tokio = { version = "1", features = ["macros"] }
